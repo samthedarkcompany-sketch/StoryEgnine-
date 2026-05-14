@@ -1552,6 +1552,14 @@ export default function App() {
       return "Hệ thống đang bận xử lý nhiều yêu cầu cùng lúc. Vui lòng giữ nguyên màn hình, AI đang tự động thử lại sau vài giây...";
     }
 
+    if (errorStr.includes("400") && errorStr.includes("API key not valid")) {
+      return "Lỗi (400): API Key của bạn không hợp lệ. Hãy vào phần Cài Đặt (bánh răng) để kiểm tra lại chữ ký (API Key).";
+    }
+
+    if (errorStr.includes("404") || errorStr.includes("not found")) {
+      return `Lỗi (404): Không tìm thấy mô hình (Model). API Key của bạn có thể không được cấp quyền sử dụng mô hình này. Hãy thử vào Cài Đặt (bánh răng), chuyển chế độ Model từ "Pro" về "Flash" và thử lại.`;
+    }
+
     // Clean up generic API errors
     const sanitizedError = errorStr
       .replace("Failed to call the Gemini API:", "")
@@ -1699,13 +1707,20 @@ export default function App() {
         );
       }
 
-      if (!abortControllerRef.current?.signal.aborted && !fullText.trim() && fullThinking.trim()) {
-        fullText = "_⚠️ Cảnh báo: Mô hình đã dừng lại trong quá trình suy nghĩ (có thể do giới hạn về output token hoặc timeout). Vui lòng gửi lại yêu cầu để tiếp tục._";
-        setMessages((prev) =>
-          prev.map((msg) =>
-            msg.id === aiMessageId ? { ...msg, content: fullText, thinking: fullThinking } : msg,
-          ),
-        );
+      if (!abortControllerRef.current?.signal.aborted) {
+        if (!fullText.trim() && fullThinking.trim()) {
+          fullText = "_⚠️ Cảnh báo: Mô hình đã dừng lại trong quá trình suy nghĩ (có thể do giới hạn về output token hoặc timeout). Vui lòng gửi lại yêu cầu để tiếp tục._";
+        } else if (!fullText.trim() && !fullThinking.trim()) {
+          fullText = "_⚠️ Lỗi: Không nhận được phản hồi từ AI (Model trả về kết quả rỗng). Trạng thái này có thể do lỗi mạng, vi phạm chính sách an toàn, hoặc API Key bị giới hạn._";
+        }
+        
+        if (fullText !== content) {
+          setMessages((prev) =>
+            prev.map((msg) =>
+              msg.id === aiMessageId ? { ...msg, content: fullText, thinking: fullThinking } : msg,
+            ),
+          );
+        }
       }
     } catch (error: any) {
       if (error.name === "AbortError") {
@@ -1947,13 +1962,19 @@ export default function App() {
           );
         }
 
-        if (!abortControllerRef.current?.signal.aborted && !fullText.trim() && fullThinking.trim()) {
-          fullText = "_⚠️ Cảnh báo: Mô hình đã dừng lại trong quá trình suy nghĩ (có thể do giới hạn về output token hoặc timeout). Vui lòng nhấn nút Rewrite để thử lại._";
-          setMessages((prev) =>
-            prev.map((msg) =>
-              msg.id === aiMessageId ? { ...msg, content: fullText, thinking: fullThinking } : msg,
-            ),
-          );
+        if (!abortControllerRef.current?.signal.aborted) {
+          if (!fullText.trim() && fullThinking.trim()) {
+            fullText = "_⚠️ Cảnh báo: Mô hình đã dừng lại trong quá trình suy nghĩ (có thể do giới hạn về output token hoặc timeout). Vui lòng nhấn nút Rewrite để thử lại._";
+          } else if (!fullText.trim() && !fullThinking.trim()) {
+            fullText = "_⚠️ Lỗi: Không nhận được phản hồi từ AI (Model trả về kết quả rỗng). Trạng thái này có thể do lỗi mạng, vi phạm chính sách an toàn, hoặc API Key bị giới hạn._";
+          }
+          if (fullText !== content) {
+            setMessages((prev) =>
+              prev.map((msg) =>
+                msg.id === aiMessageId ? { ...msg, content: fullText, thinking: fullThinking } : msg,
+              ),
+            );
+          }
         }
       } catch (error: any) {
         if (error.name !== "AbortError") {
@@ -2062,8 +2083,12 @@ export default function App() {
             content = text.replace(thinkingMatch[0], "").trim();
           }
 
-          if (!abortControllerRef.current?.signal.aborted && !content.trim() && thinking.trim()) {
-            content = "_⚠️ Cảnh báo: Mô hình đã dừng lại trong quá trình suy nghĩ (có thể do giới hạn về output token hoặc timeout). Vui lòng nhấn nút Rewrite để thử lại._";
+          if (!abortControllerRef.current?.signal.aborted) {
+            if (!content.trim() && thinking.trim()) {
+              content = "_⚠️ Cảnh báo: Mô hình đã dừng lại trong quá trình suy nghĩ (có thể do giới hạn về output token hoặc timeout). Vui lòng nhấn nút Rewrite để thử lại._";
+            } else if (!content.trim() && !thinking.trim()) {
+              content = "_⚠️ Lỗi: Không nhận được phản hồi từ AI (Model trả về rỗng)._";
+            }
           }
 
           const aiMessage: Message = {
@@ -3064,16 +3089,6 @@ export default function App() {
             ref={scrollRef}
             className="flex-1 overflow-y-auto custom-scrollbar px-4 lg:px-6 py-8 space-y-12"
           >
-            {apiError && (
-              <div className="max-w-4xl mx-auto w-full p-4 bg-red-500/10 border border-red-500/20 rounded-2xl flex items-center gap-3 text-red-400 text-sm animate-in fade-in slide-in-from-top-2">
-                <X
-                  className="w-4 h-4 cursor-pointer"
-                  onClick={() => setApiError(null)}
-                />
-                <p>{apiError}</p>
-              </div>
-            )}
-
             {messages.length === 0 && (
               <div className="h-full flex flex-col items-center justify-center text-center max-w-lg mx-auto space-y-6 opacity-60 px-4">
                 <div className="w-16 h-16 lg:w-20 lg:h-20 bg-orange-500/20 rounded-full flex items-center justify-center">
@@ -3115,6 +3130,16 @@ export default function App() {
             <ArrowDown className="w-5 h-5 text-white/60 group-hover:text-white" />
           </button>
         </div>
+
+        {apiError && (
+          <div className="mx-4 lg:mx-6 mb-2 p-4 bg-red-500/10 border border-red-500/20 rounded-2xl flex items-center justify-between text-red-400 text-sm animate-in fade-in slide-in-from-bottom-2 shrink-0 shadow-lg relative z-20">
+            <p className="flex-1 font-bold">{apiError}</p>
+            <X
+              className="w-5 h-5 cursor-pointer ml-3 opacity-70 hover:opacity-100"
+              onClick={() => setApiError(null)}
+            />
+          </div>
+        )}
 
         {/* Input Area */}
         <ChatInput
