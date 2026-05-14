@@ -1049,8 +1049,13 @@ export default function App() {
   const isApiKeyMissing = !process.env.GEMINI_API_KEY && !userApiKey;
   
   const handleSaveUserApiKey = (key: string) => {
-    localStorage.setItem("USER_GEMINI_API_KEY", key);
-    setUserApiKey(key);
+    const validKey = key.replace(/[^\x21-\x7E]/g, '');
+    if (validKey) {
+      localStorage.setItem("USER_GEMINI_API_KEY", validKey);
+    } else {
+      localStorage.removeItem("USER_GEMINI_API_KEY");
+    }
+    setUserApiKey(validKey);
     window.location.reload();
   };
 

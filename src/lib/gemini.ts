@@ -7,8 +7,22 @@ if (!envApiKey) {
 
 function getAI() {
   const envKey = process.env.GEMINI_API_KEY;
-  const localKey = localStorage.getItem("USER_GEMINI_API_KEY");
-  const keyToUse = envKey || localKey;
+  const localKey = typeof window !== 'undefined' ? localStorage.getItem("USER_GEMINI_API_KEY") : null;
+  
+  let validEnvKey = envKey;
+  if (validEnvKey === "undefined" || validEnvKey === "null" || validEnvKey === "MISSING_KEY") {
+    validEnvKey = undefined;
+  }
+  
+  let validLocalKey = localKey;
+  if (validLocalKey === "undefined" || validLocalKey === "null" || validLocalKey === "MISSING_KEY") {
+    validLocalKey = undefined;
+  }
+
+  validEnvKey = validEnvKey?.replace(/[^\x21-\x7E]/g, '');
+  validLocalKey = validLocalKey?.replace(/[^\x21-\x7E]/g, '');
+
+  const keyToUse = validLocalKey || validEnvKey;
   if (!keyToUse) {
     throw new Error("Missing API Key");
   }
