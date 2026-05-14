@@ -1,0 +1,109 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    function isSignedIn() { return request.auth != null && request.auth.token.email_verified == true; }
+    function incoming() { return request.resource.data; }
+    function existing() { return resource.data; }
+    function isValidId(id) { return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$'); }
+
+    function isValidProfile(data) {
+      return data.keys().hasAny(['userId', 'email', 'createdAt', 'updatedAt']) 
+        && data.userId is string && data.userId == request.auth.uid
+        && data.email is string && data.email.size() <= 200
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp
+        && (
+          !('settings' in data) || (
+            data.settings is map
+            && (!('mode' in data.settings) || (data.settings.mode is string && data.settings.mode.size() <= 50))
+            && (!('deepThinking' in data.settings) || data.settings.deepThinking is bool)
+            && (!('autoSave' in data.settings) || data.settings.autoSave is bool)
+            && (!('customSystemPrompt' in data.settings) || (data.settings.customSystemPrompt is string && data.settings.customSystemPrompt.size() <= 50000))
+          )
+        );
+    }
+
+    match /users/{userId} {
+      allow get: if isSignedIn() && request.auth.uid == userId;
+      allow list: if isSignedIn() && resource.data.userId == request.auth.uid;
+      allow create: if isSignedIn() 
+        && isValidId(userId)
+        && request.auth.uid == userId
+        && incoming().keys().hasOnly(['userId', 'email', 'createdAt', 'updatedAt', 'settings'])
+        && incoming().keys().hasAll(['userId', 'email', 'createdAt', 'updatedAt'])
+        && incoming().createdAt == request.time
+        && isValidProfile(incoming());
+      allow update: if isSignedIn()
+        && request.auth.uid == userId
+        && isValidProfile(incoming())
+        && incoming().userId == existing().userId
+        && incoming().email == existing().email
+        && incoming().createdAt == existing().createdAt
+        && incoming().diff(existing()).affectedKeys().hasOnly(['updatedAt', 'settings'])
+        && incoming().updatedAt == request.time;
+    }
+
+    function isValidDraft(data) {
+      return data.userId is string && data.userId == request.auth.uid
+        && data.title is string && data.title.size() <= 300
+        && data.messages is list && data.messages.size() <= 15000
+        && data.timeline is list && data.timeline.size() <= 500
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp
+        && (!('draftSettings' in data) || data.draftSettings is map);
+    }
+
+    match /drafts/{draftId} {
+      allow get: if isSignedIn() && resource.data.userId == request.auth.uid;
+      allow list: if isSignedIn() && resource.data.userId == request.auth.uid;
+      allow create: if isSignedIn()
+        && isValidId(draftId)
+        && incoming().keys().hasOnly(['userId', 'title', 'messages', 'timeline', 'createdAt', 'updatedAt', 'draftSettings'])
+        && incoming().keys().hasAll(['userId', 'title', 'messages', 'timeline', 'createdAt', 'updatedAt'])
+        && incoming().createdAt == request.time
+        && isValidDraft(incoming());
+      allow update: if isSignedIn()
+        && resource.data.userId == request.auth.uid
+        && isValidDraft(incoming())
+        && incoming().userId == existing().userId
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && incoming().diff(existing()).affectedKeys().hasOnly(['title', 'messages', 'timeline', 'updatedAt', 'draftSettings']);
+      allow delete: if isSignedIn() && resource.data.userId == request.auth.uid;
+    }
+
+    function isValidLore(data) {
+      return data.userId is string && data.userId == request.auth.uid
+        && data.title is string && data.title.size() <= 300
+        && data.content is string && data.content.size() <= 100000
+        && data.type is string && data.type.size() <= 50
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp
+        && (!('tags' in data) || (data.tags is list && data.tags.size() <= 100));
+    }
+
+    match /lore/{loreId} {
+      allow get: if isSignedIn() && resource.data.userId == request.auth.uid;
+      allow list: if isSignedIn() && resource.data.userId == request.auth.uid;
+      allow create: if isSignedIn()
+        && isValidId(loreId)
+        && incoming().keys().hasOnly(['userId', 'title', 'content', 'type', 'createdAt', 'updatedAt', 'tags'])
+        && incoming().keys().hasAll(['userId', 'title', 'content', 'type', 'createdAt', 'updatedAt'])
+        && incoming().createdAt == request.time
+        && isValidLore(incoming());
+      allow update: if isSignedIn()
+        && resource.data.userId == request.auth.uid
+        && isValidLore(incoming())
+        && incoming().userId == existing().userId
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && incoming().diff(existing()).affectedKeys().hasOnly(['title', 'content', 'type', 'updatedAt', 'tags']);
+      allow delete: if isSignedIn() && resource.data.userId == request.auth.uid;
+    }
+  }
+}

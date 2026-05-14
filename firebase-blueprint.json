@@ -1,0 +1,79 @@
+{
+  "entities": {
+    "userProfile": {
+      "title": "User Profile",
+      "description": "User profile and global settings",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "email": { "type": "string" },
+        "createdAt": { "type": "number" },
+        "updatedAt": { "type": "number" },
+        "settings": {
+          "type": "object",
+          "properties": {
+            "mode": { "type": "string" },
+            "deepThinking": { "type": "boolean" },
+            "autoSave": { "type": "boolean" }
+          }
+        }
+      },
+      "required": ["userId", "email", "createdAt", "updatedAt"]
+    },
+    "draft": {
+      "title": "Story Draft",
+      "description": "A draft containing messages and timeline",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "title": { "type": "string" },
+        "messages": {
+          "type": "array",
+          "items": { "type": "object" }
+        },
+        "timeline": {
+          "type": "array",
+          "items": { "type": "object" }
+        },
+        "draftSettings": {
+          "type": "object"
+        },
+        "createdAt": { "type": "number" },
+        "updatedAt": { "type": "number" }
+      },
+      "required": ["userId", "title", "messages", "timeline", "createdAt", "updatedAt"]
+    },
+    "lore": {
+      "title": "Lore Item",
+      "description": "A piece of worldbuilding lore",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "title": { "type": "string" },
+        "content": { "type": "string" },
+        "type": { "type": "string" },
+        "tags": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "createdAt": { "type": "number" },
+        "updatedAt": { "type": "number" }
+      },
+      "required": ["userId", "title", "content", "type", "createdAt", "updatedAt"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": { "$ref": "#/entities/userProfile" },
+      "description": "User profiles"
+    },
+    "/drafts/{draftId}": {
+      "schema": { "$ref": "#/entities/draft" },
+      "description": "Story drafts belonging to users"
+    },
+    "/lore/{loreId}": {
+      "schema": { "$ref": "#/entities/lore" },
+      "description": "Lore items belonging to users"
+    }
+  }
+}

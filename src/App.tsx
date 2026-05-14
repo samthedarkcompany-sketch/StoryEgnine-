@@ -58,6 +58,9 @@ import {
 import { extractTextFromPDF } from "./lib/pdf";
 import { clsx, type ClassValue } from "clsx";
 import { twMerge } from "tailwind-merge";
+import { auth, db } from "./lib/firebase";
+import { onAuthStateChanged, signInWithPopup, GoogleAuthProvider, signOut, User } from "firebase/auth";
+import { doc, setDoc, getDocs, getDoc, collection, updateDoc, deleteDoc, serverTimestamp, query, where } from "firebase/firestore";
 
 function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
@@ -1030,6 +1033,36 @@ function DebouncedInput({ value, onChange, ...props }: any) {
 }
 
 export default function App() {
+  const [user, setUser] = useState<User | null>(null);
+  const [authLoading, setAuthLoading] = useState(true);
+
+  useEffect(() => {
+    const unsub = onAuthStateChanged(auth, (u) => {
+      setUser(u);
+      setAuthLoading(false);
+    });
+    return () => unsub();
+  }, []);
+
+  const handleLogin = async () => {
+    try {
+      const provider = new GoogleAuthProvider();
+      await signInWithPopup(auth, provider);
+    } catch (error) {
+      console.error("Login failed", error);
+      alert("Đăng nhập thất bại. Bạn có thể cần cho phép popup.");
+    }
+  };
+
+  const handleLogout = async () => {
+    try {
+      await signOut(auth);
+      window.location.reload();
+    } catch (error) {
+      console.error("Logout failed", error);
+    }
+  };
+
   const [isStorageLoaded, setIsStorageLoaded] = useState(false);
   const [currentDraftId, setCurrentDraftId] = useState<string>("");
   const [drafts, setDrafts] = useState<Draft[]>([]);
@@ -1082,124 +1115,163 @@ export default function App() {
   }, []);
 
   useEffect(() => {
+    if (authLoading) return;
     const loadStorage = async () => {
       try {
-        // Load settings
         const defaultSettings: StorySettings = {
           deepThinking: true,
           mode: "normal",
           autoSave: true,
           customSystemPrompt: "",
         };
-        const savedSettings = await get("storySettings");
-        if (savedSettings) {
-          setSettings({ ...defaultSettings, ...savedSettings });
-        } else {
-          const localSettings = localStorage.getItem("storySettings");
-          if (localSettings) {
-            const parsed = JSON.parse(localSettings);
-            setSettings({ ...defaultSettings, ...parsed });
-            await set("storySettings", { ...defaultSettings, ...parsed });
-          }
-        }
 
-        // Load global lore
-        let savedLore = await get("storyLore");
+        let finalSettings = defaultSettings;
+        let finalLore: LoreItem[] = [];
+        let finalDrafts: Draft[] = [];
+        let useFallback = true;
+        let loadedDrafts: any[] | undefined = undefined;
 
-        // Load drafts from IDB
-        let loadedDrafts: any[] | undefined = await get("storyDrafts");
-
-        // Fallback to localStorage for drafts if IDB is empty
-        const localDraftsStr = localStorage.getItem("storyDrafts");
-        let localDrafts: any[] = [];
-        if (localDraftsStr) {
+        if (user) {
           try {
-            localDrafts = JSON.parse(localDraftsStr);
-          } catch (e) {}
-        }
-
-        // Combine sources for migration
-        const migrationSources = [
-          ...(Array.isArray(loadedDrafts) ? loadedDrafts : []),
-          ...(Array.isArray(localDrafts) ? localDrafts : []),
-        ];
-
-        // Migration logic: if global lore is missing or empty, collect it from all available draft sources
-        if (!savedLore || !Array.isArray(savedLore) || savedLore.length === 0) {
-          const allLoreItems: LoreItem[] = [];
-          const seenIds = new Set<string>();
-
-          migrationSources.forEach((d: any) => {
-            if (d && d.lore && Array.isArray(d.lore)) {
-              d.lore.forEach((item: LoreItem) => {
-                if (item && item.id && !seenIds.has(item.id)) {
-                  allLoreItems.push(item);
-                  seenIds.add(item.id);
-                }
-              });
+            const userDoc = await getDoc(doc(db, "users", user.uid));
+            if (userDoc.exists()) {
+              const data = userDoc.data();
+              if (data.settings) {
+                finalSettings = { ...defaultSettings, ...data.settings };
+              }
             }
-          });
 
-          if (allLoreItems.length > 0) {
-            savedLore = allLoreItems;
-            await set("storyLore", allLoreItems);
-            console.log(
-              `Migrated ${allLoreItems.length} lore items from drafts.`,
-            );
+            const loreSnap = await getDocs(query(collection(db, "lore"), where("userId", "==", user.uid)));
+            finalLore = loreSnap.docs.map(d => {
+              const data = d.data();
+              return {
+                id: d.id,
+                title: data.title || "",
+                content: data.content || "",
+                type: data.type || "",
+                tags: data.tags || [],
+              };
+            });
+
+            const draftsSnap = await getDocs(query(collection(db, "drafts"), where("userId", "==", user.uid)));
+            finalDrafts = draftsSnap.docs.map(d => {
+              const data = d.data();
+              return {
+                id: d.id,
+                title: data.title || "Bản thảo không tên",
+                messages: data.messages || [],
+                timeline: data.timeline || [],
+                updatedAt: data.updatedAt ? data.updatedAt.toMillis() : Date.now(),
+                activeTags: [],
+                draftSettings: data.draftSettings,
+              };
+            });
+            finalDrafts.sort((a, b) => b.updatedAt - a.updatedAt);
+            if (finalDrafts.length > 0 || userDoc.exists()) {
+              useFallback = false;
+            }
+          } catch (error) {
+            console.error("Error loading from Firestore", error);
           }
         }
 
-        if (savedLore && Array.isArray(savedLore)) {
-          setLore(savedLore);
-        }
+        if (useFallback) {
+          const savedSettings = await get("storySettings");
+          if (savedSettings) {
+            finalSettings = { ...defaultSettings, ...savedSettings };
+          } else {
+            const localSettings = localStorage.getItem("storySettings");
+            if (localSettings) {
+              const parsed = JSON.parse(localSettings);
+              finalSettings = { ...defaultSettings, ...parsed };
+              await set("storySettings", finalSettings);
+            }
+          }
 
-        // Ensure loadedDrafts is populated for the rest of the logic
-        if (!loadedDrafts || !Array.isArray(loadedDrafts) || loadedDrafts.length === 0) {
-          loadedDrafts = localDrafts;
-          if (loadedDrafts.length > 0) {
-            await set("storyDrafts", loadedDrafts);
+          let savedLore = await get("storyLore");
+          loadedDrafts = await get("storyDrafts");
+          const localDraftsStr = localStorage.getItem("storyDrafts");
+          let localDrafts: any[] = [];
+          if (localDraftsStr) {
+            try {
+              localDrafts = JSON.parse(localDraftsStr);
+            } catch (e) {}
+          }
+
+          const migrationSources = [
+            ...(Array.isArray(loadedDrafts) ? loadedDrafts : []),
+            ...(Array.isArray(localDrafts) ? localDrafts : []),
+          ];
+
+          if (!savedLore || !Array.isArray(savedLore) || savedLore.length === 0) {
+            const allLoreItems: LoreItem[] = [];
+            const seenIds = new Set<string>();
+            migrationSources.forEach((d: any) => {
+              if (d && d.lore && Array.isArray(d.lore)) {
+                d.lore.forEach((item: LoreItem) => {
+                  if (item && item.id && !seenIds.has(item.id)) {
+                    allLoreItems.push(item);
+                    seenIds.add(item.id);
+                  }
+                });
+              }
+            });
+            if (allLoreItems.length > 0) {
+              finalLore = allLoreItems;
+              await set("storyLore", allLoreItems);
+            }
+          } else {
+             if (Array.isArray(savedLore)) finalLore = savedLore;
+          }
+
+          if (!loadedDrafts || !Array.isArray(loadedDrafts) || loadedDrafts.length === 0) {
+            loadedDrafts = localDrafts;
+            if (loadedDrafts.length > 0) {
+              await set("storyDrafts", loadedDrafts);
+            }
+          }
+
+          if (loadedDrafts && Array.isArray(loadedDrafts) && loadedDrafts.length > 0) {
+            finalDrafts = loadedDrafts.map((d) => ({
+              id: d.id,
+              title: d.title,
+              messages: Array.isArray(d.messages) ? d.messages : [],
+              timeline: Array.isArray(d.timeline) ? d.timeline : [],
+              updatedAt: d.updatedAt || Date.now(),
+              activeTags: Array.isArray(d.activeTags) ? d.activeTags : [],
+              draftSettings: d.draftSettings,
+            }));
+          } else {
+            finalDrafts = [{
+              id: Date.now().toString(),
+              title: "Bản thảo mới",
+              messages: [],
+              timeline: [],
+              updatedAt: Date.now(),
+              activeTags: [],
+            }];
           }
         }
 
-        if (
-          loadedDrafts &&
-          Array.isArray(loadedDrafts) &&
-          loadedDrafts.length > 0
-        ) {
-          const sanitizedDrafts: Draft[] = loadedDrafts.map((d) => ({
-            id: d.id,
-            title: d.title,
-            messages: Array.isArray(d.messages) ? d.messages : [],
-            timeline: Array.isArray(d.timeline) ? d.timeline : [],
-            updatedAt: d.updatedAt || Date.now(),
-            activeTags: Array.isArray(d.activeTags) ? d.activeTags : [],
-            draftSettings: d.draftSettings,
-          }));
-          setDrafts(sanitizedDrafts);
+        setSettings(finalSettings);
+        prevSettingsRef.current = JSON.parse(JSON.stringify(finalSettings));
 
-          let savedDraftId = await get("currentDraftId");
-          if (!savedDraftId) {
-            savedDraftId = localStorage.getItem("currentDraftId");
-          }
+        setLore(finalLore);
+        prevLoreRef.current = JSON.parse(JSON.stringify(finalLore));
 
-          const current =
-            sanitizedDrafts.find((d) => d.id === savedDraftId) ||
-            sanitizedDrafts[0];
-          setCurrentDraftId(current.id);
-          setMessages(current.messages || []);
-          setTimeline(current.timeline || []);
-        } else {
-          const initialDraft: Draft = {
-            id: Date.now().toString(),
-            title: "Bản thảo mới",
-            messages: [],
-            timeline: [],
-            updatedAt: Date.now(),
-          };
-          setDrafts([initialDraft]);
-          setCurrentDraftId(initialDraft.id);
-          setMessages([]);
+        setDrafts(finalDrafts);
+        prevDraftsRef.current = finalDrafts.map(d => ({...d, messages: [...d.messages], timeline: [...d.timeline], activeTags: [...(d.activeTags||[])]}));
+
+        let savedDraftId = await get("currentDraftId");
+        if (!savedDraftId) {
+          savedDraftId = localStorage.getItem("currentDraftId");
         }
+        const current = finalDrafts.find((d) => d.id === savedDraftId) || finalDrafts[0];
+        setCurrentDraftId(current.id);
+        setMessages(current.messages || []);
+        setActiveTags(current.activeTags || []);
+        setTimeline(current.timeline || []);
+
       } catch (e) {
         console.error("Failed to load storage", e);
       } finally {
@@ -1207,7 +1279,7 @@ export default function App() {
       }
     };
     loadStorage();
-  }, []);
+  }, [authLoading, user]);
 
   const currentDraft = drafts.find((d) => d.id === currentDraftId) ||
     drafts[0] || {
@@ -1413,30 +1485,111 @@ export default function App() {
     }
   }, [currentDraftId, isStorageLoaded]);
 
+  // Track previous state for fine-grained sync
+  const prevDraftsRef = useRef<Draft[]>([]);
+  const prevLoreRef = useRef<LoreItem[]>([]);
+  const prevSettingsRef = useRef<StorySettings | null>(null);
+
   // Persistence
   useEffect(() => {
-    if (isStorageLoaded) {
-      set("storyDrafts", drafts).catch((e) => {
-        console.error("Failed to save drafts to idb-keyval", e);
+    if (!isStorageLoaded) return;
+    
+    set("storyDrafts", drafts).catch((e) => {
+      console.error("Failed to save drafts to idb-keyval", e);
+    });
+
+    if (user) {
+      drafts.forEach(d => {
+        const prev = prevDraftsRef.current.find(p => p.id === d.id);
+        if (!prev || prev.updatedAt !== d.updatedAt) {
+          const isNew = !prev;
+          const payload: any = {
+            title: d.title || "Bản thảo không tên",
+            messages: d.messages ? JSON.parse(JSON.stringify(d.messages)) : [],
+            timeline: d.timeline ? JSON.parse(JSON.stringify(d.timeline)) : [],
+            updatedAt: serverTimestamp(),
+          };
+          if (isNew) {
+            payload.userId = user.uid;
+            payload.createdAt = serverTimestamp();
+          }
+          if (d.draftSettings) {
+            payload.draftSettings = JSON.parse(JSON.stringify(d.draftSettings));
+          }
+          setDoc(doc(db, "drafts", d.id), payload, { merge: true }).catch(e => console.error("Firestore sync error drafts", e));
+        }
       });
+      prevDraftsRef.current = drafts;
     }
-  }, [drafts, isStorageLoaded]);
+  }, [drafts, isStorageLoaded, user]);
 
   useEffect(() => {
-    if (isStorageLoaded) {
-      set("storySettings", settings).catch((e) => {
-        console.error("Failed to save settings to idb-keyval", e);
-      });
+    if (!isStorageLoaded) return;
+    
+    set("storySettings", settings).catch((e) => {
+      console.error("Failed to save settings to idb-keyval", e);
+    });
+
+    if (user) {
+      if (!prevSettingsRef.current || JSON.stringify(prevSettingsRef.current) !== JSON.stringify(settings)) {
+        getDoc(doc(db, "users", user.uid)).then((docSnap) => {
+          if (!docSnap.exists()) {
+            setDoc(doc(db, "users", user.uid), {
+               userId: user.uid,
+               email: user.email || "",
+               createdAt: serverTimestamp(),
+               settings: JSON.parse(JSON.stringify(settings)),
+               updatedAt: serverTimestamp(),
+            }, { merge: true }).catch(e => console.error("Firestore sync error users", e));
+          } else {
+            setDoc(doc(db, "users", user.uid), {
+               settings: JSON.parse(JSON.stringify(settings)),
+               updatedAt: serverTimestamp(),
+            }, { merge: true }).catch(e => console.error("Firestore sync error users", e));
+          }
+        });
+        prevSettingsRef.current = settings;
+      }
     }
-  }, [settings, isStorageLoaded]);
+  }, [settings, isStorageLoaded, user]);
 
   useEffect(() => {
-    if (isStorageLoaded) {
-      set("storyLore", lore).catch((e) => {
-        console.error("Failed to save lore to idb-keyval", e);
+    if (!isStorageLoaded) return;
+    
+    set("storyLore", lore).catch((e) => {
+      console.error("Failed to save lore to idb-keyval", e);
+    });
+
+    if (user) {
+      lore.forEach(l => {
+        const prev = prevLoreRef.current.find(p => p.id === l.id);
+        if (!prev || JSON.stringify(prev) !== JSON.stringify(l)) {
+          const isNew = !prev;
+          const payload: any = {
+            title: l.title || "Lore không tên",
+            content: l.content || "",
+            type: l.type || "",
+            updatedAt: serverTimestamp(),
+          };
+          if (l.tags) {
+            payload.tags = JSON.parse(JSON.stringify(l.tags));
+          }
+          if (isNew) {
+            payload.userId = user.uid;
+            payload.createdAt = serverTimestamp();
+          }
+          setDoc(doc(db, "lore", l.id), payload, { merge: true }).catch(e => console.error("Firestore sync error lore", e));
+        }
       });
+      // Handle deleted lore
+      prevLoreRef.current.forEach(p => {
+        if (!lore.find(l => l.id === p.id)) {
+          deleteDoc(doc(db, "lore", p.id)).catch(e => console.error("Firestore delete error", e));
+        }
+      });
+      prevLoreRef.current = lore;
     }
-  }, [lore, isStorageLoaded]);
+  }, [lore, isStorageLoaded, user]);
 
   // Auto-save logic
   useEffect(() => {
@@ -2393,6 +2546,19 @@ export default function App() {
                 })}
               </div>
               <div className="p-4 border-t border-white/10 space-y-3">
+                {user ? (
+                  <div className="flex items-center justify-between text-xs text-white/50 bg-white/5 p-3 rounded-xl border border-white/10">
+                    <span className="truncate max-w-[140px]" title={user.email || ""}>{user.email}</span>
+                    <button onClick={handleLogout} className="hover:text-red-400 font-bold transition-all">Đăng xuất</button>
+                  </div>
+                ) : (
+                  <button
+                    onClick={handleLogin}
+                    className="w-full py-3 bg-blue-500/10 hover:bg-blue-500/20 border border-blue-500/20 text-blue-400 rounded-xl flex items-center justify-center gap-2 transition-all font-bold text-sm"
+                  >
+                    Đăng nhập G-Mail (Lưu trữ đồng bộ)
+                  </button>
+                )}
                 <button
                   onClick={() => setIsSettingsOpen(true)}
                   className="w-full py-3 bg-white/5 hover:bg-white/10 border border-white/10 text-white rounded-xl flex items-center justify-center gap-2 transition-all font-bold text-sm"
@@ -3080,6 +3246,24 @@ export default function App() {
               <Settings className="w-4 h-4" />
               <span className="hidden md:inline">Cài đặt</span>
             </button>
+            {user ? (
+              <div 
+                className="p-2 lg:px-4 lg:py-2 glass-panel flex items-center gap-2 text-sm font-bold whitespace-nowrap shrink-0 border border-blue-500/20 bg-blue-500/5 cursor-pointer hover:bg-blue-500/10 transition-all"
+                title="Đăng xuất"
+                onClick={handleLogout}
+              >
+                <div className="w-2 h-2 rounded-full bg-green-500 animate-pulse"></div>
+                <span className="hidden md:inline text-blue-400">{user.email?.split('@')[0]}</span>
+              </div>
+            ) : (
+              <button
+                onClick={handleLogin}
+                className="p-2 lg:px-4 lg:py-2 glass-panel hover:bg-blue-500/10 border-blue-500/30 text-blue-400 flex items-center gap-2 text-sm font-bold whitespace-nowrap shrink-0 transition-all"
+              >
+                <span className="hidden md:inline">Đăng nhập</span>
+                <span className="md:hidden">Đ.Nhập</span>
+              </button>
+            )}
           </div>
         </header>
 
