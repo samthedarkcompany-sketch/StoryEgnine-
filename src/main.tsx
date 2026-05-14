@@ -2,9 +2,8 @@ import {StrictMode} from 'react';
 import {createRoot} from 'react-dom/client';
 
 // Polyfill Promise.withResolvers for pdfjs-dist compatibility in older browsers/iOS
-if (typeof Promise.withResolvers === 'undefined') {
-  // @ts-ignore
-  Promise.withResolvers = function () {
+if (typeof (Promise as any).withResolvers === 'undefined') {
+  (Promise as any).withResolvers = function () {
     let resolve, reject;
     const promise = new Promise((res, rej) => {
       resolve = res;
@@ -15,9 +14,8 @@ if (typeof Promise.withResolvers === 'undefined') {
 }
 
 // Polyfill Object.groupBy for pdfjs-dist
-if (typeof Object.groupBy === 'undefined') {
-  // @ts-ignore
-  Object.groupBy = function(iterable, cb) {
+if (typeof (Object as any).groupBy === 'undefined') {
+  (Object as any).groupBy = function(iterable: any, cb: any) {
     const obj = Object.create(null);
     for (const item of iterable) {
       const key = cb(item);

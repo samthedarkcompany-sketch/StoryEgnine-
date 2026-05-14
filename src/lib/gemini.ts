@@ -1,10 +1,19 @@
 import { GoogleGenAI, GenerateContentResponse, Modality, ThinkingLevel } from "@google/genai";
 
-const apiKey = process.env.GEMINI_API_KEY;
-if (!apiKey) {
-  console.warn("GEMINI_API_KEY is missing. StoryEngine v1 will operate in offline mode or fail to generate.");
+const envApiKey = process.env.GEMINI_API_KEY;
+if (!envApiKey) {
+  console.warn("GEMINI_API_KEY is missing from environment. Will fallback to localStorage.");
 }
-const ai = new GoogleGenAI({ apiKey: apiKey || "MISSING_KEY" });
+
+function getAI() {
+  const envKey = process.env.GEMINI_API_KEY;
+  const localKey = localStorage.getItem("USER_GEMINI_API_KEY");
+  const keyToUse = envKey || localKey;
+  if (!keyToUse) {
+    throw new Error("Missing API Key");
+  }
+  return new GoogleGenAI({ apiKey: keyToUse });
+}
 
 async function withRetry<T>(fn: () => Promise<T>, maxRetries = 999999, initialDelay = 1000, onRetry?: (attempt: number, delay: number) => void): Promise<T> {
   let lastError: any;
@@ -333,7 +342,7 @@ export async function generateStoryResponse(
 
   const modelName = settings.mode === 'pro' ? "gemini-3.1-pro-preview" : "gemini-3-flash-preview";
 
-  return withRetry(() => ai.models.generateContent({
+  return withRetry(() => getAI().models.generateContent({
     model: modelName,
     contents,
     config: {
@@ -409,7 +418,7 @@ export async function generateStoryResponseStream(
 
   const modelName = settings.mode === 'pro' ? "gemini-3.1-pro-preview" : "gemini-3-flash-preview";
 
-  return withRetry(() => ai.models.generateContentStream({
+  return withRetry(() => getAI().models.generateContentStream({
     model: modelName,
     contents,
     config: {
@@ -424,7 +433,7 @@ export async function generateStoryResponseStream(
 
 export async function suggestDraftName(content: string) {
   return withRetry(async () => {
-    const response = await ai.models.generateContent({
+    const response = await getAI().models.generateContent({
       model: "gemini-3-flash-preview",
       contents: `Bạn là StoryEngine v1. Dựa trên nội dung câu chuyện sau, hãy đặt một tiêu đề ngắn gọn (tối đa 5-7 từ) và ấn tượng bằng tiếng Việt. Chỉ trả về tiêu đề, không thêm bất kỳ lời giải thích nào.\n\nNội dung: ${content.substring(0, 1000)}`,
     });

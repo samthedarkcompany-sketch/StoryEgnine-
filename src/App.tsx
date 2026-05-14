@@ -1045,7 +1045,14 @@ export default function App() {
   });
   const [apiError, setApiError] = useState<string | null>(null);
   const [isPdfExtracting, setIsPdfExtracting] = useState(false);
-  const isApiKeyMissing = !process.env.GEMINI_API_KEY;
+  const [userApiKey, setUserApiKey] = useState(() => localStorage.getItem("USER_GEMINI_API_KEY") || "");
+  const isApiKeyMissing = !process.env.GEMINI_API_KEY && !userApiKey;
+  
+  const handleSaveUserApiKey = (key: string) => {
+    localStorage.setItem("USER_GEMINI_API_KEY", key);
+    setUserApiKey(key);
+    window.location.reload();
+  };
 
   const stateRef = useRef({ drafts, messages, lore, timeline, activeTags, settings, currentDraftId, isStorageLoaded });
   useEffect(() => {
@@ -2191,15 +2198,23 @@ export default function App() {
               Kiến trúc kể chuyện độc lập, không giới hạn.
             </p>
           </div>
-          <div className="p-4 bg-red-500/10 border border-red-500/20 rounded-xl space-y-3">
-            <p className="text-sm text-red-400 font-bold">
+          <div className="p-4 bg-orange-500/10 border border-orange-500/20 rounded-xl space-y-3">
+            <p className="text-sm text-orange-400 font-bold">
               Cần kết nối với Core Engine
             </p>
-            <p className="text-xs text-red-300/60 leading-relaxed">
-              StoryEngine v1 yêu cầu kết nối với Core Engine (Gemini API) để dệt
-              nên những câu chuyện. Vui lòng thiết lập API Key trong phần cài
-              đặt của nền tảng.
+            <p className="text-xs text-orange-300/60 leading-relaxed">
+              Vui lòng nhập API Key của Google Gemini để bắt đầu. Key của bạn sẽ chỉ được lưu trên trình duyệt hiện tại.
             </p>
+            <input 
+               type="password"
+               placeholder="AIza..."
+               className="w-full bg-black/50 border border-white/10 rounded-lg p-2 text-sm outline-none focus:border-orange-500/50 text-white"
+               onKeyDown={(e) => {
+                 if (e.key === "Enter") {
+                    handleSaveUserApiKey(e.currentTarget.value);
+                 }
+               }}
+            />
           </div>
           <button
             onClick={() => window.location.reload()}
@@ -2728,6 +2743,26 @@ export default function App() {
                     placeholder="Ví dụ: Luôn viết theo ngôi thứ nhất, sử dụng từ ngữ cổ phong..."
                     className="w-full bg-white/5 border border-white/10 rounded-xl p-4 text-sm outline-none focus:border-orange-500/50 h-32 resize-none"
                   />
+                </div>
+
+                <div className="pt-4 border-t border-white/10 space-y-4">
+                  <div className="space-y-2">
+                    <p className="font-bold text-orange-400">Thiết lập Gemini API Key</p>
+                    <p className="text-xs text-white/40">
+                      Chỉ sử dụng nếu bản cài đặt của bạn báo lỗi thiếu API Key (khi bạn nhấn nút Share App).
+                    </p>
+                    <input 
+                      type="password"
+                      placeholder="AIzaSy..."
+                      defaultValue={userApiKey}
+                      className="w-full bg-white/5 border border-white/10 rounded-xl p-3 text-sm outline-none focus:border-orange-500/50"
+                      onChange={(e) => {
+                        const val = e.target.value.trim();
+                        localStorage.setItem("USER_GEMINI_API_KEY", val);
+                        setUserApiKey(val);
+                      }}
+                    />
+                  </div>
                 </div>
 
                 <div className="pt-4 border-t border-white/10 space-y-4">
